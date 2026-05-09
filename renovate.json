@@ -1,0 +1,29 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "schedule": ["before 6am on monday"],
+  "labels": ["dependencies"],
+  "packageRules": [
+    {
+      "matchManagers": ["github-actions"],
+      "groupName": "GitHub Actions",
+      "automerge": false
+    },
+    {
+      "matchManagers": ["gomod"],
+      "groupName": "Go modules",
+      "automerge": false
+    },
+    {
+      "matchManagers": ["dockerfile"],
+      "groupName": "Dockerfile base images",
+      "automerge": false
+    },
+    {
+      "matchDepNames": ["tinygo"],
+      "groupName": "TinyGo"
+    }
+  ]
+}
