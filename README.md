@@ -81,7 +81,7 @@ The music path must match what Navidrome sees — the analyzer reads the same au
 
 ### 2. Install the Plugin
 
-1. Download `mood-playlists.ndp` from [Releases](https://github.com/craiglush/navidrome-mood-plugin/releases) (or [build from source](#building-from-source))
+1. Download `mood-playlists.ndp` from [Releases](https://github.com/RFLundgren/navidrome-mood-plugin/releases) (or [build from source](#building-from-source))
 2. Copy it to your Navidrome plugins directory: `<navidrome-data>/plugins/`
 3. Restart Navidrome (or it auto-loads if `ND_PLUGINS_AUTORELOAD=true`)
 4. Go to **Settings > Plugins > Mood Playlists** and approve permissions
@@ -178,6 +178,11 @@ All settings are configurable from Navidrome's plugin settings UI:
 | Party Threshold | `0.55` | Minimum score for party |
 | Melancholy Threshold | `0.45` | Minimum score for sad/melancholy |
 | Aggressive Threshold | `0.45` | Minimum score for aggressive |
+| Max Tracks per Artist | `3` | Per-artist cap per playlist (0 = no limit) |
+| Playlist Variation Pool | `3` | Pool multiplier for weekly variation (1–10) |
+| Re-analyze Uncertain | `true` | Re-queue tracks with low-confidence scores |
+| Re-analyze Percent | `0` | % of library to randomly re-analyze each cycle (0–20) |
+| Re-analysis Schedule | `0 4 1 * *` | Cron expression for dedicated re-analysis run |
 
 Note: Composite mood conditions (Study, Workout, etc.) are not configurable via the UI — they use fixed thresholds tuned for their specific scenarios. The simple mood thresholds above remain fully adjustable.
 
@@ -214,7 +219,7 @@ Note: Composite mood conditions (Study, Workout, etc.) are not configurable via 
 make docker-build
 ```
 
-### With Go 1.25+
+### With Go 1.24+
 
 ```bash
 GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o plugin.wasm .
