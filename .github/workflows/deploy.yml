@@ -1,0 +1,13 @@
+name: Build and Deploy Plugin
+
+on:
+  push:
+    branches: [ "main" ] # This triggers the build whenever you push to main
+
+jobs:
+  call-shared-workflow:
+    # This points to the "brain" you just created in your automation repo
+    uses: RFLundgren/automation/.github/workflows/reusable-docker-push.yml@main
+    with:
+      image_name: "navidrome-mood-plugin"
+    secrets: inherit
