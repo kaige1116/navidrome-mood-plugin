@@ -7,7 +7,6 @@ on:
 
 jobs:
   call-shared-workflow:
-    # ADD THESE THREE LINES:
     permissions:
       contents: read
       packages: write
@@ -15,4 +14,6 @@ jobs:
     uses: RFLundgren/automation/.github/workflows/reusable-docker-push.yml@main
     with:
       image_name: "navidrome-mood-plugin"
+      # ADD THIS LINE:
+      build_context: "./analyzer-service"
     secrets: inherit
