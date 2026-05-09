@@ -3,10 +3,15 @@ name: Build and Deploy Plugin
 on:
   push:
     branches: [ "main" ]
-  workflow_dispatch: # This adds the "Run workflow" button manually
+  workflow_dispatch:
 
 jobs:
   call-shared-workflow:
+    # ADD THESE THREE LINES:
+    permissions:
+      contents: read
+      packages: write
+      
     uses: RFLundgren/automation/.github/workflows/reusable-docker-push.yml@main
     with:
       image_name: "navidrome-mood-plugin"
