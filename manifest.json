@@ -3,7 +3,7 @@
   "name": "Mood Playlists",
   "id": "mood-playlists",
   "author": "Craig Lusher",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "Audio analysis-powered mood playlists and Instant Mix. Creates 13 mood playlists (Happy, Chill, Energetic, Melancholy, Party, Aggressive, Study, Workout, Sleep, Road Trip, Cooking, Dining, Background) using an external analyzer service.",
   "website": "https://github.com/RFLundgren/navidrome-mood-plugin/blob/master/HELP.md",
   "config": {
@@ -68,7 +68,7 @@
         },
         "reanalyze_schedule": {
           "type": "string",
-          "title": "Re-analysis Schedule (cron)",
+          "title": "Re-analysis Cron",
           "description": "When to run the dedicated re-analysis pass (uncertain tracks + random %).",
           "default": "0 4 1 * *"
         },
@@ -232,7 +232,12 @@
                 {
                   "type": "Control",
                   "scope": "#/properties/reanalyze_percent"
-                },
+                }
+              ]
+            },
+            {
+              "type": "HorizontalLayout",
+              "elements": [
                 {
                   "type": "Control",
                   "scope": "#/properties/reanalyze_schedule"

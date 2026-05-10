@@ -464,6 +464,7 @@ func runAnalysis() int32 {
 			return 0
 		}
 
+		offset += len(songs)
 		host.KVStoreSet("analysis:offset", []byte(strconv.Itoa(offset)))
 
 		// Stop fetching if we are approaching the deadline
