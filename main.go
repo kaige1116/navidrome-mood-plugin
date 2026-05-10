@@ -226,8 +226,9 @@ func onInit() int32 {
 
 	// Clear any stale tasks from previous runs, then ensure the queue exists
 	host.TaskClearQueue("mood-analysis")
+	concurrency := configInt("max_concurrency", 2)
 	if err := host.TaskCreateQueue("mood-analysis", host.QueueConfig{
-		Concurrency: 4,
+		Concurrency: int32(concurrency),
 		MaxRetries:  3,
 	}); err != nil {
 		pdk.Log(pdk.LogDebug, "Task queue init: "+err.Error())

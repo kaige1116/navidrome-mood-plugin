@@ -256,8 +256,8 @@ def analyze_url(req: AnalyzeUrlRequest):
         result = subprocess.run(
             [
                 "ffmpeg", "-y",
-                "-i", req.url,
                 "-t", str(ANALYSIS_DURATION),
+                "-i", req.url,
                 "-ar", "44100",
                 "-ac", "1",
                 "-sample_fmt", "s16",
