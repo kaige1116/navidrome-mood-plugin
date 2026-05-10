@@ -17,7 +17,7 @@ jobs:
   build-and-push:
     runs-on: ubuntu-latest
     env:
-      IMAGE_NAME: mood-analyzer
+      IMAGE_NAME: navidrome-mood-plugin
       GHCR_USERNAME: ${{ github.actor }}
       GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       # DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
@@ -49,8 +49,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ghcr.io/${{ env.GHCR_USERNAME }}/mood-analyzer:latest
-            ghcr.io/${{ env.GHCR_USERNAME }}/mood-analyzer:${{ github.ref_name }}
+            ghcr.io/${{ env.GHCR_USERNAME }}/navidrome-mood-plugin:latest
+            ghcr.io/${{ env.GHCR_USERNAME }}/navidrome-mood-plugin:${{ github.ref_name }}
           # ${{ env.DOCKER_HUB_USERNAME }}/mood-analyzer:latest
           # ${{ env.DOCKER_HUB_USERNAME }}/mood-analyzer:${{ github.ref_name }}
           build-args: |

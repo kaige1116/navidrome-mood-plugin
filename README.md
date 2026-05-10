@@ -71,7 +71,7 @@ mood-analyzer:
 or using the published image of the latest release with:
 ```yaml
 mood-analyzer:
-  image: ghcr.io/rflundgren/mood-analyzer:latest
+  image: ghcr.io/RFLundgren/navidrome-mood-plugin:latest
   container_name: mood-analyzer
   volumes:
     - /path/to/your/music:/music:ro
