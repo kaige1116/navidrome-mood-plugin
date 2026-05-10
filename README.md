@@ -179,6 +179,7 @@ All settings are configurable from Navidrome's plugin settings UI:
 | Melancholy Threshold | `0.45` | Minimum score for sad/melancholy |
 | Aggressive Threshold | `0.45` | Minimum score for aggressive |
 | Max Tracks per Artist | `3` | Per-artist cap per playlist (0 = no limit) |
+| Max Analysis Workers | `2` | Number of concurrent analysis tasks (1-8) |
 | Playlist Variation Pool | `3` | Pool multiplier for weekly variation (1–10) |
 | Re-analyze Uncertain | `true` | Re-queue tracks with low-confidence scores |
 | Re-analyze Percent | `0` | % of library to randomly re-analyze each cycle (0–20) |

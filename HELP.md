@@ -270,19 +270,21 @@ Alternatively, set it to `* * * * *` to fire every minute, wait one minute, then
 
 1. The plugin fetches all tracks from your library via the Subsonic API (in batches of 500)
 2. Each track is added to a background task queue
-3. Workers (4 concurrent by default) process the queue — each worker streams the first 120 seconds of the track's audio to the analyzer service
+3. Workers (**2 concurrent by default, configurable**) process the queue — each worker streams the first 120 seconds of the track's audio to the analyzer service
 4. The analyzer extracts mood scores using TensorFlow models and returns them
 5. Scores are saved in the plugin's KV store, keyed by track ID
 
 ### How long will it take?
 
-Each track takes roughly 10–20 seconds to analyze on a typical server CPU. With 4 concurrent workers:
+Each track takes roughly 10–20 seconds to analyze on a typical server CPU. With **2 concurrent workers** (default):
 
 | Library size | Estimated time |
 |-------------|----------------|
-| 1,000 tracks | 45 min – 1.5 hours |
-| 5,000 tracks | 4–8 hours |
-| 10,000 tracks | 8–16 hours |
+| 1,000 tracks | 1.5 – 3 hours |
+| 5,000 tracks | 8 – 16 hours |
+| 10,000 tracks | 16 – 32 hours |
+
+You can increase **Max Analysis Workers** in the configuration to speed this up if your hardware has multiple CPU cores. For example, setting it to `4` will halve these times. Conversely, reduce it to `1` if the analysis is making your server unresponsive.
 
 Analysis is **incremental** — already-analyzed tracks are skipped on every subsequent run. Once your library is fully analyzed, the nightly run only processes new additions and completes in minutes.
 
@@ -441,6 +443,7 @@ Each refresh updates existing playlists in-place rather than creating new ones. 
 | `playlist_refresh_schedule` | `0 3 * * 0` | — | — | Cron expression for playlist refresh |
 | `playlist_track_count` | `30` | 10 | 200 | Maximum tracks per playlist |
 | `max_tracks_per_artist` | `3` | 0 | 50 | Maximum tracks per artist per playlist (0 = no limit) |
+| `max_concurrency` | `2` | 1 | 8 | Number of concurrent analysis tasks |
 | `playlist_variation_pool` | `3` | 1 | 10 | Shuffle top N × pool tracks before picking; higher = more weekly variety (1 = always same tracks) |
 | `reanalyze_uncertain` | `true` | — | — | Automatically re-analyze tracks with low-confidence scores |
 | `reanalyze_percent` | `0` | 0 | 20 | Percentage of library to randomly re-analyze each re-analysis run (0 = disabled) |
