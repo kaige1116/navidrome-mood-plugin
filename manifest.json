@@ -3,7 +3,7 @@
   "name": "Mood Playlists",
   "id": "mood-playlists",
   "author": "Craig Lusher",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "description": "Audio analysis-powered mood playlists and Instant Mix. Creates 13 mood playlists (Happy, Chill, Energetic, Melancholy, Party, Aggressive, Study, Workout, Sleep, Road Trip, Cooking, Dining, Background) using an external analyzer service.",
   "website": "https://github.com/RFLundgren/navidrome-mood-plugin/blob/master/HELP.md",
   "config": {
@@ -153,6 +153,24 @@
           "title": "Aggressive Threshold",
           "description": "Minimum score (0-1) for aggressive mood classification",
           "default": 0.55
+        },
+        "show_dates_in_title": {
+          "type": "boolean",
+          "title": "Show Dates in Playlist Names",
+          "description": "Append the generated/creation dates directly to the playlist names so they are visible in Navidrome's Web UI. If off, dates are only saved to the comment field for external apps.",
+          "default": true
+        },
+        "enrich_playlists": {
+          "type": "boolean",
+          "title": "Add Creation Dates to Playlists",
+          "description": "Automatically add creation dates to all non-plugin playlists in your library.",
+          "default": false
+        },
+        "enrich_schedule": {
+          "type": "string",
+          "title": "Creation Date Sync Schedule",
+          "description": "Cron expression for when to scan and update the creation dates on all playlists.",
+          "default": "0 5 * * *"
         }
       }
     },
@@ -321,6 +339,34 @@
                 {
                   "type": "Control",
                   "scope": "#/properties/aggressive_threshold"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "Group",
+          "label": "Playlist Dates & Timestamps",
+          "elements": [
+            {
+              "type": "HorizontalLayout",
+              "elements": [
+                {
+                  "type": "Control",
+                  "scope": "#/properties/show_dates_in_title"
+                }
+              ]
+            },
+            {
+              "type": "HorizontalLayout",
+              "elements": [
+                {
+                  "type": "Control",
+                  "scope": "#/properties/enrich_playlists"
+                },
+                {
+                  "type": "Control",
+                  "scope": "#/properties/enrich_schedule"
                 }
               ]
             }

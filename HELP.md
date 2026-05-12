@@ -15,10 +15,11 @@ This guide walks you through every step needed to get the Mood Playlists plugin 
 7. [Step 5 — Run Your First Analysis](#7-step-5--run-your-first-analysis)
 8. [Step 6 — Generate the Playlists](#8-step-6--generate-the-playlists)
 9. [Understanding the Playlists](#9-understanding-the-playlists)
-10. [Configuration Reference](#10-configuration-reference)
-11. [Monitoring Analysis Progress](#11-monitoring-analysis-progress)
-12. [Troubleshooting](#12-troubleshooting)
-13. [Building from Source](#13-building-from-source)
+10. [Playlist Dates & Timestamps](#10-playlist-dates--timestamps)
+11. [Configuration Reference](#11-configuration-reference)
+12. [Monitoring Analysis Progress](#12-monitoring-analysis-progress)
+13. [Troubleshooting](#13-troubleshooting)
+14. [Building from Source](#14-building-from-source)
 
 ---
 
@@ -60,6 +61,7 @@ The plugin runs **three independent schedules**:
 | Analysis | `0 2 * * *` | Queues any new unanalyzed tracks nightly |
 | Re-analysis | `0 4 1 * *` | Re-queues uncertain tracks and a random % of the library monthly |
 | Playlist Refresh | `0 3 * * 0` | Rebuilds all 13 playlists weekly |
+| Creation Date Sync | `0 5 * * *` | Appends creation dates to playlists (if enabled) |
 
 ---
 
@@ -242,6 +244,9 @@ You should see `{"subsonic-response":{"status":"ok",...}}`.
 | Variation Pool | `3` | Weekly variation multiplier — playlists draw randomly from the top N × pool tracks |
 | Max Tracks per Artist | `3` | Maximum tracks from any one artist in a playlist. Set to `0` for no limit. |
 | Similar Songs Count | `20` | Tracks returned when using Instant Mix |
+| Show Dates in Playlist Names | `true` | Append timestamps directly to playlist titles (visible in Navidrome Web UI). |
+| Add Creation Dates to Playlists | `false` | Automatically sync creation dates to the comments (and optionally titles) of all playlists. |
+| Creation Date Sync Schedule | `0 5 * * *` | When to run the creation date sync task. |
 
 Save settings after making any changes.
 
@@ -408,7 +413,25 @@ Each refresh updates existing playlists in-place rather than creating new ones. 
 
 ---
 
-## 10. Configuration Reference
+## 10. Playlist Dates & Timestamps
+
+The plugin can help you keep track of when playlists were created or last refreshed. This information is saved using the Subsonic API so that it can be read by third-party mobile and desktop clients (like Symfonium or Feishin), and optionally displayed directly in Navidrome's Web UI.
+
+### Mood Playlists (Last Generated)
+Whenever the plugin refreshes the 13 mood playlists (e.g., "Happy Mix"), it automatically records the exact date and time of the refresh. This helps you confirm that your scheduled refreshes are running successfully.
+
+### All Playlists (Creation Date Sync)
+By enabling **Add Creation Dates to Playlists** in the settings, the plugin will scan your entire Navidrome library on a schedule. It reads the hidden internal creation date of every playlist you've ever made and appends it to the playlist's metadata. 
+
+### Display Options
+Navidrome's Web UI does not natively display playlist descriptions or comments. To solve this, the plugin offers the **Show Dates in Playlist Names** toggle:
+
+- **Toggle ON (Default):** Dates are appended directly to the playlist name (e.g., `Happy Mix (12 May, 19:30)` or `Summer Hits (Created: 15 Aug, 14:20)`). This guarantees the dates are visible everywhere, including inside the native Navidrome Web UI.
+- **Toggle OFF:** Dates are *not* added to the title. Instead, they are strictly saved to the hidden `comment` field. This keeps your titles clean in Navidrome, but allows advanced third-party clients to still fetch and display the timestamps. If you turn this off after it was on, the plugin will automatically revert the playlist names to clean them up on its next run.
+
+---
+
+## 11. Configuration Reference
 
 ### Cron schedule format
 
@@ -455,10 +478,13 @@ Each refresh updates existing playlists in-place rather than creating new ones. 
 | `party_threshold` | `0.55` | 0 | 1 | Minimum score for Party Mix |
 | `melancholy_threshold` | `0.45` | 0 | 1 | Minimum score for Melancholy Mix |
 | `aggressive_threshold` | `0.55` | 0 | 1 | Minimum score for Aggressive Mix |
+| `show_dates_in_title` | `true` | — | — | Append timestamps directly to playlist titles |
+| `enrich_playlists` | `false` | — | — | Automatically sync creation dates to all playlists |
+| `enrich_schedule` | `0 5 * * *` | — | — | Cron expression for the creation date sync task |
 
 ---
 
-## 11. Monitoring Analysis Progress
+## 12. Monitoring Analysis Progress
 
 ### Count analyzed tracks
 
@@ -493,7 +519,7 @@ docker logs mood-analyzer --tail 50
 
 ---
 
-## 12. Troubleshooting
+## 13. Troubleshooting
 
 ### Plugin does not appear in Settings → Plugins
 
@@ -598,7 +624,7 @@ Wait 30 seconds, then reload the settings page in your browser.
 
 ---
 
-## 13. Building from Source
+## 14. Building from Source
 
 ### Requirements
 

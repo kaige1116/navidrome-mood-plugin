@@ -10,6 +10,7 @@ Works with any Subsonic-compatible client (Symfonium, Sublime Music, etc.).
 - **Mood-Aware Instant Mix** — Replaces the default Instant Mix with mood-similarity matching (Euclidean distance across mood vectors)
 - **Scheduled Analysis** — Periodically scans your library for new tracks and sends them to the analyzer
 - **Scheduled Refresh** — Regenerates mood playlists on a cron schedule so they evolve as your library grows
+- **Playlist Dates & Timestamps** — Automatically tracks when mood playlists are generated and syncs creation dates to all your playlists (visible in Subsonic clients and optionally the Navidrome UI)
 - **Fully Configurable** — Mood thresholds, playlist sizes, analysis/refresh schedules, and analyzer URL are all configurable from Navidrome's plugin settings UI
 
 ### Mood Playlists
@@ -184,6 +185,9 @@ All settings are configurable from Navidrome's plugin settings UI:
 | Re-analyze Uncertain | `true` | Re-queue tracks with low-confidence scores |
 | Re-analyze Percent | `0` | % of library to randomly re-analyze each cycle (0–20) |
 | Re-analysis Schedule | `0 4 1 * *` | Cron expression for dedicated re-analysis run |
+| Show Dates in Playlist Names | `true` | Append generation/creation dates directly to playlist titles (visible in Navidrome Web UI) |
+| Add Creation Dates to Playlists | `false` | Automatically sync creation dates to the comments (and optionally titles) of all playlists |
+| Creation Date Sync Schedule | `0 5 * * *` | Cron expression for the creation date sync task |
 
 Note: Composite mood conditions (Study, Workout, etc.) are not configurable via the UI — they use fixed thresholds tuned for their specific scenarios. The simple mood thresholds above remain fully adjustable.
 
@@ -211,6 +215,8 @@ Note: Composite mood conditions (Study, Workout, etc.) are not configurable via 
    - **Composite moods** — selects tracks matching ALL conditions (e.g., Study requires high relaxation AND low energy AND low aggression), sorted by a primary score field
 
 3. **Instant Mix** — When triggered on a track, calculates Euclidean distance between the source track's mood vector and all analyzed tracks, returning the closest matches.
+
+4. **Metadata Sync** — Optionally adds creation dates to all non-plugin playlists, and tracks generation dates for mood playlists, exposing this metadata via the Subsonic API and optionally appending it to playlist titles.
 
 ## Building from Source
 

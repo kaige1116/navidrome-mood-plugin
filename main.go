@@ -224,6 +224,16 @@ func onInit() int32 {
 		}
 	}
 
+	if configBool("enrich_playlists", false) {
+		schedule := configString("enrich_schedule", "0 5 * * *")
+		_, err := host.SchedulerScheduleRecurring(schedule, "enrich-playlists", "mood-enrich")
+		if err != nil {
+			pdk.Log(pdk.LogError, "Failed to schedule metadata enrichment: "+err.Error())
+		} else {
+			pdk.Log(pdk.LogInfo, "Scheduled metadata enrichment task: "+schedule)
+		}
+	}
+
 	// Clear any stale tasks from previous runs, then ensure the queue exists
 	host.TaskClearQueue("mood-analysis")
 	concurrency := configInt("max_concurrency", 2)
@@ -261,6 +271,8 @@ func onSchedule() int32 {
 		return refreshPlaylists()
 	case "reanalyze":
 		return runScheduledReanalysis()
+	case "enrich-playlists":
+		return enrichPlaylists()
 	default:
 		pdk.Log(pdk.LogWarn, "Unknown schedule payload: "+payload)
 		return 0
@@ -896,26 +908,66 @@ func getExistingPlaylistIDs() map[string]string {
 }
 
 // upsertPlaylist creates a new playlist or replaces the tracks in an existing one.
-// existingIDs maps playlist name → id; when a match is found the playlist is
-// updated in-place so Navidrome never accumulates duplicates.
-func upsertPlaylist(name string, songIDs []string, existingIDs map[string]string) {
+// It conditionally appends a "last generated" date to the name, and matches existing playlists
+// by checking if their name starts with the baseLabel.
+func upsertPlaylist(baseLabel string, songIDs []string, existingIDs map[string]string) {
+	now := time.Now().Format("02 Jan, 15:04")
+	
+	fullName := baseLabel
+	if configBool("show_dates_in_title", true) {
+		fullName = fmt.Sprintf("%s (%s)", baseLabel, now)
+	}
+
+	commentStr := "Last generated: " + now
+
 	var params string
-	if id, ok := existingIDs[name]; ok {
-		// Update existing playlist — replace all tracks
-		params = "playlistId=" + url.QueryEscape(id) + "&name=" + url.QueryEscape(name)
+	var plID string
+	isUpdate := false
+
+	// Find the existing playlist by looking for any playlist that starts with the base label
+	for name, id := range existingIDs {
+		if strings.HasPrefix(name, baseLabel) {
+			plID = id
+			break
+		}
+	}
+
+	if plID != "" {
+		// Update existing playlist — replace all tracks and update name
+		params = "playlistId=" + url.QueryEscape(plID) + "&name=" + url.QueryEscape(fullName)
+		isUpdate = true
 	} else {
 		// Create brand-new playlist
-		params = "name=" + url.QueryEscape(name)
+		params = "name=" + url.QueryEscape(fullName)
 	}
 	for _, id := range songIDs {
 		params += "&songId=" + url.QueryEscape(id)
 	}
+
 	_, err := subsonicCall("createPlaylist?" + params)
 	if err != nil {
-		pdk.Log(pdk.LogError, "Failed to upsert playlist '"+name+"': "+err.Error())
+		pdk.Log(pdk.LogError, "Failed to upsert playlist '"+fullName+"': "+err.Error())
 		return
 	}
-	pdk.Log(pdk.LogInfo, fmt.Sprintf("Created playlist '%s' with %d tracks", name, len(songIDs)))
+
+	// For new playlists, fetch the newly created ID so we can set the comment.
+	if !isUpdate {
+		existingIDs = getExistingPlaylistIDs()
+		for name, id := range existingIDs {
+			if strings.HasPrefix(name, baseLabel) {
+				plID = id
+				break
+			}
+		}
+	}
+
+	// Save the timestamp to the comment field as well (and force rename)
+	if plID != "" {
+		updateParams := "playlistId=" + url.QueryEscape(plID) + "&name=" + url.QueryEscape(fullName) + "&comment=" + url.QueryEscape(commentStr)
+		subsonicCall("updatePlaylist?" + updateParams)
+	}
+
+	pdk.Log(pdk.LogInfo, fmt.Sprintf("Updated playlist '%s' (%d tracks)", fullName, len(songIDs)))
 }
 
 // ── Subsonic auth helpers ─────────────────────────────────────────
@@ -1070,4 +1122,93 @@ func configBool(key string, defaultVal bool) bool {
 		return defaultVal
 	}
 	return val == "true" || val == "1" || val == "yes"
+}
+
+// enrichPlaylists iterates through all playlists in the library and appends
+// a "[Created: YYYY-MM-DD]" tag to their comments if not already present.
+func enrichPlaylists() int32 {
+	pdk.Log(pdk.LogInfo, "Running metadata enrichment for all playlists...")
+	body, err := subsonicCall("getPlaylists.view?")
+	if err != nil {
+		pdk.Log(pdk.LogError, "getPlaylists failed: "+err.Error())
+		return 1
+	}
+
+	var resp struct {
+		SubsonicResponse struct {
+			Playlists struct {
+				Playlist []struct {
+					ID      string `json:"id"`
+					Name    string `json:"name"`
+					Comment string `json:"comment"`
+					Created string `json:"created"`
+				} `json:"playlist"`
+			} `json:"playlists"`
+		} `json:"subsonic-response"`
+	}
+
+	if err := json.Unmarshal([]byte(body), &resp); err != nil {
+		pdk.Log(pdk.LogError, "Failed to parse playlists: "+err.Error())
+		return 1
+	}
+
+	showInTitle := configBool("show_dates_in_title", true)
+	enrichedCount := 0
+	for _, pl := range resp.SubsonicResponse.Playlists.Playlist {
+		// Skip if it's a mood playlist (they manage their own dates)
+		if strings.Contains(pl.Comment, "Last generated:") || strings.Contains(pl.Name, " Mix (") || strings.HasSuffix(pl.Name, " Mix") {
+			continue
+		}
+
+		hasTitleTag := strings.Contains(pl.Name, "(Created:")
+		hasCommentTag := strings.Contains(pl.Comment, "Created:")
+
+		needsTitleUpdate := (showInTitle && !hasTitleTag) || (!showInTitle && hasTitleTag)
+		needsCommentUpdate := !hasCommentTag
+
+		if !needsTitleUpdate && !needsCommentUpdate {
+			continue
+		}
+
+		// Parse ISO 8601 (e.g. 2021-02-23T04:35:38+00:00) and format to (DD MMM, HH:MM)
+		createdDate := pl.Created
+		if t, err := time.Parse(time.RFC3339, pl.Created); err == nil {
+			createdDate = t.Format("02 Jan, 15:04")
+		} else if len(pl.Created) >= 10 {
+			// Fallback if parsing fails but we have at least a date string
+			createdDate = pl.Created[:10]
+		}
+
+		newName := pl.Name
+		if showInTitle && !hasTitleTag {
+			newName = fmt.Sprintf("%s (Created: %s)", pl.Name, createdDate)
+		} else if !showInTitle && hasTitleTag {
+			// Strip the tag from the name
+			idx := strings.LastIndex(pl.Name, " (Created:")
+			if idx != -1 {
+				newName = strings.TrimSpace(pl.Name[:idx])
+			}
+		}
+
+		newComment := pl.Comment
+		if needsCommentUpdate {
+			tag := "Created: " + createdDate
+			if newComment == "" {
+				newComment = tag
+			} else {
+				newComment = newComment + "\n" + tag
+			}
+		}
+
+		// Update the playlist metadata using Subsonic API
+		params := "playlistId=" + url.QueryEscape(pl.ID) + "&name=" + url.QueryEscape(newName) + "&comment=" + url.QueryEscape(newComment)
+		if _, err := subsonicCall("updatePlaylist?" + params); err != nil {
+			pdk.Log(pdk.LogWarn, fmt.Sprintf("Failed to update playlist '%s': %s", pl.Name, err.Error()))
+			continue
+		}
+		enrichedCount++
+	}
+
+	pdk.Log(pdk.LogInfo, fmt.Sprintf("Metadata enrichment complete. Updated %d playlists.", enrichedCount))
+	return 0
 }
