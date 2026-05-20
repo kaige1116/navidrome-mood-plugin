@@ -86,10 +86,18 @@ environment:
   ND_PLUGINS_AUTORELOAD: "true"
 ```
 
+**If you use other metadata plugins (for Instant Mix):**
+If you have other plugins that provide similar songs (e.g., AudioMuse-AI), you must ensure `mood-playlists` is queried first by adding the `ND_AGENTS` variable:
+```yaml
+environment:
+  ND_AGENTS: "mood-playlists,audiomuseai,lastfm,listenbrainz"
+```
+
 **In navidrome.toml:**
 ```toml
 PluginsEnabled = true
 PluginsAutoReload = true
+Agents = ["mood-playlists", "audiomuseai", "lastfm", "listenbrainz"]
 ```
 
 `PluginsAutoReload` makes Navidrome detect new or updated plugin files automatically without a full restart. It is optional but saves time during setup.

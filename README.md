@@ -88,7 +88,17 @@ The music path must match what Navidrome sees — the analyzer reads the same au
 4. Go to **Settings > Plugins > Mood Playlists** and approve permissions
 5. Set the **Analyzer Service URL** to your analyzer (e.g., `http://mood-analyzer:8000`)
 
-### 3. Done
+### 3. Configure Agent Precedence (For Instant Mix)
+
+If you are using multiple Navidrome metadata agents (like AudioMuse-AI, Last.fm, etc.), you must tell Navidrome to query the Mood plugin first for Instant Mix to work correctly.
+
+Add the `ND_AGENTS` environment variable to your Navidrome configuration and list `mood-playlists` **before** other similar-song providers:
+
+```yaml
+ND_AGENTS: mood-playlists,audiomuseai,lastfm,listenbrainz
+```
+
+### 4. Done
 
 The plugin will:
 - Analyze unanalyzed tracks daily at 2 AM (configurable)
