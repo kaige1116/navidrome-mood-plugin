@@ -360,11 +360,13 @@ func (p *moodPlugin) GetSimilarSongsByTrack(req metadata.SimilarSongsByTrackRequ
 
 // ── Analysis Logic ───────────────────────────────────────────────
 
-type analysisTask struct {
-	ID     string `json:"id"`
-	Title  string `json:"title"`
-	Artist string `json:"artist"`
-	Force  bool   `json:"force,omitempty"` // bypass the skip-if-already-analyzed check
+type pluginTask struct {
+	TaskType string `json:"task_type,omitempty"` // "analyze" or "generate_playlist"
+	ID       string `json:"id,omitempty"`
+	Title    string `json:"title,omitempty"`
+	Artist   string `json:"artist,omitempty"`
+	Force    bool   `json:"force,omitempty"` // bypass the skip-if-already-analyzed check
+	MoodKey  string `json:"mood_key,omitempty"`
 }
 
 // isUncertain returns true when no mood score is clearly dominant — the model
@@ -451,7 +453,7 @@ func runAnalysis() int32 {
 			if existing, ok, _ := host.KVStoreGet("mood:" + song.ID); ok && len(existing) > 0 {
 				continue
 			}
-			taskData, _ := json.Marshal(analysisTask{
+			taskData, _ := json.Marshal(pluginTask{
 				ID:     song.ID,
 				Title:  song.Title,
 				Artist: song.Artist,
@@ -518,7 +520,7 @@ func queueReanalysis(start time.Time, deadline time.Duration) {
 					if time.Since(start) >= deadline {
 						break
 					}
-					taskData, _ := json.Marshal(analysisTask{ID: id, Force: true})
+					taskData, _ := json.Marshal(pluginTask{ID: id, Force: true})
 					if _, err := host.TaskEnqueue("mood-analysis", taskData); err == nil {
 						requeued++
 					}
@@ -564,7 +566,7 @@ func queueReanalysis(start time.Time, deadline time.Duration) {
 		if len(parts) > 1 {
 			artist = parts[1]
 		}
-		taskData, _ := json.Marshal(analysisTask{ID: id, Title: title, Artist: artist, Force: true})
+		taskData, _ := json.Marshal(pluginTask{ID: id, Title: title, Artist: artist, Force: true})
 		if _, err := host.TaskEnqueue("mood-analysis", taskData); err == nil {
 			requeued++
 		}
@@ -587,10 +589,14 @@ func onTaskExecute() int32 {
 		taskData = envelope.Payload
 	}
 
-	var task analysisTask
+	var task pluginTask
 	if err := json.Unmarshal(taskData, &task); err != nil {
 		pdk.Log(pdk.LogError, "Failed to parse task payload: "+err.Error())
 		return 1
+	}
+
+	if task.TaskType == "generate_playlist" {
+		return generateSinglePlaylist(task.MoodKey)
 	}
 
 	// Skip if already analyzed, unless this is a forced re-analysis task
@@ -753,7 +759,29 @@ func selectTracks(sorted []trackWithScores, limit, maxPerArtist, poolMultiplier 
 }
 
 func refreshPlaylists() int32 {
-	pdk.Log(pdk.LogInfo, "Refreshing mood playlists...")
+	pdk.Log(pdk.LogInfo, "Queuing mood playlist generation tasks...")
+	
+	// Queue simple moods
+	for _, mood := range moods {
+		taskData, _ := json.Marshal(pluginTask{TaskType: "generate_playlist", MoodKey: mood.Key})
+		if _, err := host.TaskEnqueue("mood-analysis", taskData); err != nil {
+			pdk.Log(pdk.LogWarn, "Failed to queue playlist task for "+mood.Label+": "+err.Error())
+		}
+	}
+
+	// Queue composite moods
+	for _, mood := range compositeMoods {
+		taskData, _ := json.Marshal(pluginTask{TaskType: "generate_playlist", MoodKey: mood.Key})
+		if _, err := host.TaskEnqueue("mood-analysis", taskData); err != nil {
+			pdk.Log(pdk.LogWarn, "Failed to queue playlist task for "+mood.Label+": "+err.Error())
+		}
+	}
+
+	pdk.Log(pdk.LogInfo, "Mood playlist tasks queued")
+	return 0
+}
+
+func generateSinglePlaylist(moodKey string) int32 {
 	trackCount := configInt("playlist_track_count", 30)
 	poolMultiplier := configInt("playlist_variation_pool", 3)
 	existingIDs := getExistingPlaylistIDs()
@@ -796,67 +824,73 @@ func refreshPlaylists() int32 {
 
 	maxPerArtist := configInt("max_tracks_per_artist", 3)
 
-	// Simple moods (single field >= threshold)
+	// Check simple moods
 	for _, mood := range moods {
-		threshold := configFloat(mood.ThresholdKey, mood.DefaultThresh)
+		if mood.Key == moodKey {
+			threshold := configFloat(mood.ThresholdKey, mood.DefaultThresh)
 
-		var matching []trackWithScores
-		for _, t := range allTracks {
-			if getScore(t.scores, mood.ScoreField) < threshold {
-				continue
-			}
-			excluded := false
-			for _, ex := range mood.Exclude {
-				val := getScore(t.scores, ex.Field)
-				if ex.Op == ">=" && val >= ex.Value {
-					excluded = true
-					break
+			var matching []trackWithScores
+			for _, t := range allTracks {
+				if getScore(t.scores, mood.ScoreField) < threshold {
+					continue
 				}
-				if ex.Op == "<" && val < ex.Value {
-					excluded = true
-					break
+				excluded := false
+				for _, ex := range mood.Exclude {
+					val := getScore(t.scores, ex.Field)
+					if ex.Op == ">=" && val >= ex.Value {
+						excluded = true
+						break
+					}
+					if ex.Op == "<" && val < ex.Value {
+						excluded = true
+						break
+					}
+				}
+				if !excluded {
+					matching = append(matching, t)
 				}
 			}
-			if !excluded {
-				matching = append(matching, t)
+
+			sort.Slice(matching, func(i, j int) bool {
+				return getScore(matching[i].scores, mood.ScoreField) > getScore(matching[j].scores, mood.ScoreField)
+			})
+
+			songIDs := selectTracks(matching, trackCount, maxPerArtist, poolMultiplier)
+			if len(songIDs) == 0 {
+				pdk.Log(pdk.LogDebug, "No tracks for "+mood.Label)
+				return 0
 			}
+			upsertPlaylist(mood.Label, songIDs, existingIDs)
+			return 0
 		}
-
-		sort.Slice(matching, func(i, j int) bool {
-			return getScore(matching[i].scores, mood.ScoreField) > getScore(matching[j].scores, mood.ScoreField)
-		})
-
-		songIDs := selectTracks(matching, trackCount, maxPerArtist, poolMultiplier)
-		if len(songIDs) == 0 {
-			pdk.Log(pdk.LogDebug, "No tracks for "+mood.Label)
-			continue
-		}
-		upsertPlaylist(mood.Label, songIDs, existingIDs)
 	}
 
-	// Composite moods (multiple conditions)
+	// Check composite moods
 	for _, mood := range compositeMoods {
-		var matching []trackWithScores
-		for _, t := range allTracks {
-			if matchesAllConditions(t.scores, mood.Conditions) {
-				matching = append(matching, t)
+		if mood.Key == moodKey {
+			var matching []trackWithScores
+			for _, t := range allTracks {
+				if matchesAllConditions(t.scores, mood.Conditions) {
+					matching = append(matching, t)
+				}
 			}
-		}
 
-		sort.Slice(matching, func(i, j int) bool {
-			return getScore(matching[i].scores, mood.SortField) > getScore(matching[j].scores, mood.SortField)
-		})
+			sort.Slice(matching, func(i, j int) bool {
+				return getScore(matching[i].scores, mood.SortField) > getScore(matching[j].scores, mood.SortField)
+			})
 
-		songIDs := selectTracks(matching, trackCount, maxPerArtist, poolMultiplier)
-		if len(songIDs) == 0 {
-			pdk.Log(pdk.LogDebug, "No tracks for "+mood.Label)
-			continue
+			songIDs := selectTracks(matching, trackCount, maxPerArtist, poolMultiplier)
+			if len(songIDs) == 0 {
+				pdk.Log(pdk.LogDebug, "No tracks for "+mood.Label)
+				return 0
+			}
+			upsertPlaylist(mood.Label, songIDs, existingIDs)
+			return 0
 		}
-		upsertPlaylist(mood.Label, songIDs, existingIDs)
 	}
 
-	pdk.Log(pdk.LogInfo, "Mood playlists refreshed")
-	return 0
+	pdk.Log(pdk.LogWarn, "Unknown mood key for generation: " + moodKey)
+	return 1
 }
 
 func matchesAllConditions(scores MoodScores, conditions []Condition) bool {
