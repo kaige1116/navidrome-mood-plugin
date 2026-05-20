@@ -1176,6 +1176,7 @@ func enrichPlaylists() int32 {
 					Name    string `json:"name"`
 					Comment string `json:"comment"`
 					Created string `json:"created"`
+					Owner   string `json:"owner"`
 				} `json:"playlist"`
 			} `json:"playlists"`
 		} `json:"subsonic-response"`
@@ -1186,9 +1187,19 @@ func enrichPlaylists() int32 {
 		return 1
 	}
 
+	currentUser := configString("navidrome_user", "")
 	showInTitle := configBool("show_dates_in_title", true)
 	enrichedCount := 0
+	skipCount := 0
+
 	for _, pl := range resp.SubsonicResponse.Playlists.Playlist {
+		// Only enrich playlists owned by the plugin user to avoid "User not authorized" errors.
+		// If navidrome_user is not set, we are likely running in a context where ownership is implicit or managed by the host.
+		if currentUser != "" && pl.Owner != "" && !strings.EqualFold(pl.Owner, currentUser) {
+			skipCount++
+			continue
+		}
+
 		// Skip if it's a mood playlist (they manage their own dates)
 		if strings.Contains(pl.Comment, "Last generated:") || strings.Contains(pl.Name, " Mix (") || strings.HasSuffix(pl.Name, " Mix") {
 			continue

@@ -19,7 +19,7 @@
         "navidrome_user": {
           "type": "string",
           "title": "Navidrome Username",
-          "description": "Username for Navidrome API access (required for scheduled tasks)",
+          "description": "Username for Navidrome API access (Administrator required for global playlist features)",
           "writeOnly": true
         },
         "navidrome_password": {

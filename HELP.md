@@ -225,7 +225,7 @@ Go to **Settings → Plugins → Mood Playlists → Configure**.
 | Setting | What to enter |
 |---------|---------------|
 | **Navidrome URL** | The URL Navidrome is reachable at **from inside Docker**. Usually `http://navidrome:4533` if both containers share a Docker network. See note below. |
-| **Navidrome Username** | Any Navidrome username. Admin is not required. Consider creating a dedicated account (e.g. `mood-plugin`) rather than using your personal login. |
+| **Navidrome Username** | Any Navidrome username. **Administrator required** for global playlist features (enrichment, public mood mixes). |
 | **Navidrome Password** | Password for the above account. Both fields are masked — the values are stored securely and never shown again after saving. |
 | **Analyzer Service URL** | URL of the analyzer container. Usually `http://mood-analyzer:8000` if using the Docker Compose setup above. |
 
@@ -466,7 +466,7 @@ Navidrome's Web UI does not natively display playlist descriptions or comments. 
 | Setting | Default | Min | Max | Description |
 |---------|---------|-----|-----|-------------|
 | `navidrome_url` | `http://navidrome:4533` | — | — | Internal URL of Navidrome — must be reachable from inside Docker |
-| `navidrome_user` | — | — | — | Navidrome username (masked in UI) |
+| `navidrome_user` | — | — | — | Navidrome username (masked in UI). **Administrator required** for global playlist features. |
 | `navidrome_password` | — | — | — | Navidrome password (masked in UI) |
 | `analyzer_url` | `http://mood-analyzer:8000` | — | — | URL of the analyzer service |
 | `auto_analyze` | `true` | — | — | Enable scheduled analysis |
