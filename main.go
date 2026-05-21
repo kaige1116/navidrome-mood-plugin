@@ -361,12 +361,13 @@ func (p *moodPlugin) GetSimilarSongsByTrack(req metadata.SimilarSongsByTrackRequ
 // ── Analysis Logic ───────────────────────────────────────────────
 
 type pluginTask struct {
-	TaskType string `json:"task_type,omitempty"` // "analyze" or "generate_playlist"
+	TaskType string `json:"task_type,omitempty"` // "analyze", "playlist_chunk", or "playlist_finish"
 	ID       string `json:"id,omitempty"`
 	Title    string `json:"title,omitempty"`
 	Artist   string `json:"artist,omitempty"`
 	Force    bool   `json:"force,omitempty"` // bypass the skip-if-already-analyzed check
 	MoodKey  string `json:"mood_key,omitempty"`
+	Offset   int    `json:"offset,omitempty"`
 }
 
 // isUncertain returns true when no mood score is clearly dominant — the model
@@ -595,8 +596,11 @@ func onTaskExecute() int32 {
 		return 1
 	}
 
-	if task.TaskType == "generate_playlist" {
-		return generateSinglePlaylist(task.MoodKey)
+	if task.TaskType == "playlist_chunk" {
+		return handlePlaylistChunk(task.Offset)
+	}
+	if task.TaskType == "playlist_finish" {
+		return finishPlaylistGeneration()
 	}
 
 	// Skip if already analyzed, unless this is a forced re-analysis task
@@ -759,138 +763,191 @@ func selectTracks(sorted []trackWithScores, limit, maxPerArtist, poolMultiplier 
 }
 
 func refreshPlaylists() int32 {
-	pdk.Log(pdk.LogInfo, "Queuing mood playlist generation tasks...")
+	pdk.Log(pdk.LogInfo, "Starting chunked playlist generation...")
 	
-	// Queue simple moods
-	for _, mood := range moods {
-		taskData, _ := json.Marshal(pluginTask{TaskType: "generate_playlist", MoodKey: mood.Key})
-		if _, err := host.TaskEnqueue("mood-analysis", taskData); err != nil {
-			pdk.Log(pdk.LogWarn, "Failed to queue playlist task for "+mood.Label+": "+err.Error())
-		}
+	// Clear any temporary candidate data from previous runs
+	for _, m := range moods {
+		host.KVStoreSet("temp:playlist:"+m.Key, []byte("[]"))
+	}
+	for _, m := range compositeMoods {
+		host.KVStoreSet("temp:playlist:"+m.Key, []byte("[]"))
 	}
 
-	// Queue composite moods
-	for _, mood := range compositeMoods {
-		taskData, _ := json.Marshal(pluginTask{TaskType: "generate_playlist", MoodKey: mood.Key})
-		if _, err := host.TaskEnqueue("mood-analysis", taskData); err != nil {
-			pdk.Log(pdk.LogWarn, "Failed to queue playlist task for "+mood.Label+": "+err.Error())
-		}
-	}
-
-	pdk.Log(pdk.LogInfo, "Mood playlist tasks queued")
-	return 0
-}
-
-func generateSinglePlaylist(moodKey string) int32 {
-	trackCount := configInt("playlist_track_count", 30)
-	poolMultiplier := configInt("playlist_variation_pool", 3)
-	existingIDs := getExistingPlaylistIDs()
-
-	indexData, ok, err := host.KVStoreGet("mood:index")
-	if err != nil || !ok || len(indexData) == 0 {
-		pdk.Log(pdk.LogWarn, "No analyzed tracks found — run analysis first")
-		return 0
-	}
-
-	var trackIndex map[string]string
-	if err := json.Unmarshal(indexData, &trackIndex); err != nil {
-		pdk.Log(pdk.LogError, "Failed to parse track index: "+err.Error())
+	// Kick off the first chunk
+	taskData, _ := json.Marshal(pluginTask{TaskType: "playlist_chunk", Offset: 0})
+	if _, err := host.TaskEnqueue("mood-analysis", taskData); err != nil {
+		pdk.Log(pdk.LogError, "Failed to queue first playlist chunk: "+err.Error())
 		return 1
 	}
 
-	var allTracks []trackWithScores
-	for id, info := range trackIndex {
-		data, ok, err := host.KVStoreGet("mood:" + id)
-		if err != nil || !ok || len(data) == 0 {
+	pdk.Log(pdk.LogInfo, "First playlist chunk queued (Offset 0)")
+	return 0
+}
+
+func handlePlaylistChunk(offset int) int32 {
+	const chunkSize = 5000 // Process 5,000 tracks per task to stay well within 30s limit
+	const maxCandidates = 500 // Hold up to 500 best candidates for each mood in temporary storage
+
+	indexData, ok, _ := host.KVStoreGet("mood:index")
+	if !ok || len(indexData) == 0 {
+		return 0
+	}
+	var trackIndex map[string]string
+	json.Unmarshal(indexData, &trackIndex)
+
+	// Collect IDs in stable order for chunking
+	allIDs := make([]string, 0, len(trackIndex))
+	for id := range trackIndex {
+		allIDs = append(allIDs, id)
+	}
+	sort.Strings(allIDs)
+
+	if offset >= len(allIDs) {
+		// We've processed the entire library, trigger the finisher
+		taskData, _ := json.Marshal(pluginTask{TaskType: "playlist_finish"})
+		host.TaskEnqueue("mood-analysis", taskData)
+		return 0
+	}
+
+	end := offset + chunkSize
+	if end > len(allIDs) {
+		end = len(allIDs)
+	}
+
+	// 1. Process this chunk of tracks for ALL moods
+	chunkTracks := make([]trackWithScores, 0, chunkSize)
+	for _, id := range allIDs[offset:end] {
+		data, ok, _ := host.KVStoreGet("mood:" + id)
+		if !ok || len(data) == 0 {
 			continue
 		}
 		var scores MoodScores
 		if err := json.Unmarshal(data, &scores); err != nil {
 			continue
 		}
+		info := trackIndex[id]
 		parts := strings.SplitN(info, "|", 2)
-		name := parts[0]
-		artist := ""
+		name, artist := parts[0], ""
 		if len(parts) > 1 {
 			artist = parts[1]
 		}
-		allTracks = append(allTracks, trackWithScores{id: id, name: name, artist: artist, scores: scores})
+		chunkTracks = append(chunkTracks, trackWithScores{id: id, name: name, artist: artist, scores: scores})
 	}
 
-	if len(allTracks) == 0 {
-		pdk.Log(pdk.LogWarn, "No mood scores available")
-		return 0
+	// 2. Evaluate and merge candidates for each mood
+	processMoodCandidates := func(moodKey string, label string, isComposite bool, conditions []Condition, scoreField string, threshold float64, sortField string) {
+		key := "temp:playlist:" + moodKey
+		data, _, _ := host.KVStoreGet(key)
+		var existing []trackWithScores
+		json.Unmarshal(data, &existing)
+
+		// Filter chunk for this mood
+		var matches []trackWithScores
+		for _, t := range chunkTracks {
+			if isComposite {
+				if matchesAllConditions(t.scores, conditions) {
+					matches = append(matches, t)
+				}
+			} else {
+				// Simple mood logic
+				if getScore(t.scores, scoreField) >= threshold {
+					excluded := false
+					for _, ex := range conditions { // For simple moods, conditions = Exclude list
+						val := getScore(t.scores, ex.Field)
+						if (ex.Op == ">=" && val >= ex.Value) || (ex.Op == "<" && val < ex.Value) {
+							excluded = true
+							break
+						}
+					}
+					if !excluded {
+						matches = append(matches, t)
+					}
+				}
+			}
+		}
+
+		// Merge and sort
+		all := append(existing, matches...)
+		finalSortField := scoreField
+		if isComposite {
+			finalSortField = sortField
+		}
+		sort.Slice(all, func(i, j int) bool {
+			return getScore(all[i].scores, finalSortField) > getScore(all[j].scores, finalSortField)
+		})
+
+		// Cap size to keep KV value small
+		if len(all) > maxCandidates {
+			all = all[:maxCandidates]
+		}
+		encoded, _ := json.Marshal(all)
+		host.KVStoreSet(key, encoded)
 	}
 
+	// Simple moods
+	for _, m := range moods {
+		threshold := configFloat(m.ThresholdKey, m.DefaultThresh)
+		processMoodCandidates(m.Key, m.Label, false, m.Exclude, m.ScoreField, threshold, "")
+	}
+	// Composite moods
+	for _, m := range compositeMoods {
+		processMoodCandidates(m.Key, m.Label, true, m.Conditions, "", 0, m.SortField)
+	}
+
+	// 3. Queue next chunk or finisher
+	nextOffset := offset + chunkSize
+	var nextTask pluginTask
+	if nextOffset >= len(allIDs) {
+		nextTask = pluginTask{TaskType: "playlist_finish"}
+		pdk.Log(pdk.LogInfo, fmt.Sprintf("Chunk processed (%d-%d) — library complete, queuing finisher", offset, end))
+	} else {
+		nextTask = pluginTask{TaskType: "playlist_chunk", Offset: nextOffset}
+		pdk.Log(pdk.LogInfo, fmt.Sprintf("Chunk processed (%d-%d) — queuing next chunk", offset, end))
+	}
+	taskData, _ := json.Marshal(nextTask)
+	host.TaskEnqueue("mood-analysis", taskData)
+	return 0
+}
+
+func finishPlaylistGeneration() int32 {
+	pdk.Log(pdk.LogInfo, "Finishing playlist generation...")
+	trackCount := configInt("playlist_track_count", 30)
+	poolMultiplier := configInt("playlist_variation_pool", 3)
 	maxPerArtist := configInt("max_tracks_per_artist", 3)
+	existingIDs := getExistingPlaylistIDs()
 
-	// Check simple moods
-	for _, mood := range moods {
-		if mood.Key == moodKey {
-			threshold := configFloat(mood.ThresholdKey, mood.DefaultThresh)
-
-			var matching []trackWithScores
-			for _, t := range allTracks {
-				if getScore(t.scores, mood.ScoreField) < threshold {
-					continue
-				}
-				excluded := false
-				for _, ex := range mood.Exclude {
-					val := getScore(t.scores, ex.Field)
-					if ex.Op == ">=" && val >= ex.Value {
-						excluded = true
-						break
-					}
-					if ex.Op == "<" && val < ex.Value {
-						excluded = true
-						break
-					}
-				}
-				if !excluded {
-					matching = append(matching, t)
-				}
-			}
-
-			sort.Slice(matching, func(i, j int) bool {
-				return getScore(matching[i].scores, mood.ScoreField) > getScore(matching[j].scores, mood.ScoreField)
-			})
-
-			songIDs := selectTracks(matching, trackCount, maxPerArtist, poolMultiplier)
-			if len(songIDs) == 0 {
-				pdk.Log(pdk.LogDebug, "No tracks for "+mood.Label)
-				return 0
-			}
-			upsertPlaylist(mood.Label, songIDs, existingIDs)
-			return 0
+	process := func(moodKey string, label string) {
+		key := "temp:playlist:" + moodKey
+		data, ok, _ := host.KVStoreGet(key)
+		if !ok || len(data) == 0 {
+			return
 		}
+		var candidates []trackWithScores
+		json.Unmarshal(data, &candidates)
+
+		songIDs := selectTracks(candidates, trackCount, maxPerArtist, poolMultiplier)
+		if len(songIDs) > 0 {
+			upsertPlaylist(label, songIDs, existingIDs)
+		}
+		// Cleanup
+		host.KVStoreSet(key, []byte("[]"))
 	}
 
-	// Check composite moods
-	for _, mood := range compositeMoods {
-		if mood.Key == moodKey {
-			var matching []trackWithScores
-			for _, t := range allTracks {
-				if matchesAllConditions(t.scores, mood.Conditions) {
-					matching = append(matching, t)
-				}
-			}
-
-			sort.Slice(matching, func(i, j int) bool {
-				return getScore(matching[i].scores, mood.SortField) > getScore(matching[j].scores, mood.SortField)
-			})
-
-			songIDs := selectTracks(matching, trackCount, maxPerArtist, poolMultiplier)
-			if len(songIDs) == 0 {
-				pdk.Log(pdk.LogDebug, "No tracks for "+mood.Label)
-				return 0
-			}
-			upsertPlaylist(mood.Label, songIDs, existingIDs)
-			return 0
-		}
+	for _, m := range moods {
+		process(m.Key, m.Label)
+	}
+	for _, m := range compositeMoods {
+		process(m.Key, m.Label)
 	}
 
-	pdk.Log(pdk.LogWarn, "Unknown mood key for generation: " + moodKey)
-	return 1
+	pdk.Log(pdk.LogInfo, "Mood playlists successfully refreshed!")
+	return 0
+}
+
+func generateSinglePlaylist(moodKey string) int32 {
+	// This function is now deprecated in favor of chunked generation but kept for safety/compatibility.
+	// It just triggers a full refresh.
+	return refreshPlaylists()
 }
 
 func matchesAllConditions(scores MoodScores, conditions []Condition) bool {
