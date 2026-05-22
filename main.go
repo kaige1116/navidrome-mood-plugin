@@ -512,6 +512,12 @@ func runScheduledReanalysis() int32 {
 //  1. Uncertain tracks — previously analyzed but with low-confidence scores
 //  2. Random percentage — a configurable fraction of all tracks, for gradual score refresh
 func queueReanalysis(start time.Time, deadline time.Duration) {
+	indexData, ok, _ := host.KVStoreGet("mood:index")
+	var index map[string]string // id → "title|artist"
+	if ok && len(indexData) > 0 {
+		json.Unmarshal(indexData, &index)
+	}
+
 	// 1. Re-analyze uncertain tracks
 	if configBool("reanalyze_uncertain", true) {
 		data, ok, _ := host.KVStoreGet("mood:reanalyze")
@@ -523,7 +529,20 @@ func queueReanalysis(start time.Time, deadline time.Duration) {
 					if time.Since(start) >= deadline {
 						break
 					}
-					taskData, _ := json.Marshal(pluginTask{ID: id, Force: true})
+
+					// Preserve existing metadata if available to prevent the "empty name" bug
+					title, artist := "", ""
+					if index != nil {
+						if info, found := index[id]; found {
+							parts := strings.SplitN(info, "|", 2)
+							title = parts[0]
+							if len(parts) > 1 {
+								artist = parts[1]
+							}
+						}
+					}
+
+					taskData, _ := json.Marshal(pluginTask{ID: id, Title: title, Artist: artist, Force: true})
 					if _, err := host.TaskEnqueue("mood-analysis", taskData); err == nil {
 						requeued++
 					}
@@ -537,16 +556,7 @@ func queueReanalysis(start time.Time, deadline time.Duration) {
 
 	// 2. Random re-analysis percentage
 	reanalyzePct := configInt("reanalyze_percent", 0)
-	if reanalyzePct <= 0 || time.Since(start) >= deadline {
-		return
-	}
-
-	indexData, ok, _ := host.KVStoreGet("mood:index")
-	if !ok || len(indexData) == 0 {
-		return
-	}
-	var index map[string]string // id → "title|artist"
-	if err := json.Unmarshal(indexData, &index); err != nil {
+	if reanalyzePct <= 0 || time.Since(start) >= deadline || index == nil {
 		return
 	}
 
@@ -775,6 +785,30 @@ func refreshPlaylists() int32 {
 		host.KVStoreSet("temp:playlist:"+m.Key, []byte("[]"))
 	}
 
+	indexData, ok, _ := host.KVStoreGet("mood:index")
+	if !ok || len(indexData) == 0 {
+		pdk.Log(pdk.LogWarn, "No analyzed tracks found — run analysis first")
+		return 0
+	}
+
+	var trackIndex map[string]string
+	if err := json.Unmarshal(indexData, &trackIndex); err != nil {
+		pdk.Log(pdk.LogError, "Failed to parse track index: "+err.Error())
+		return 1
+	}
+
+	// PERFORMANCE OPTIMIZATION (v0.5.9): 
+	// Collect and sort IDs ONCE at the start. Sorting 86k strings is expensive.
+	// We save this sorted list to a temporary key to avoid repeating this in every chunk.
+	allIDs := make([]string, 0, len(trackIndex))
+	for id := range trackIndex {
+		allIDs = append(allIDs, id)
+	}
+	sort.Strings(allIDs)
+	
+	idListJSON, _ := json.Marshal(allIDs)
+	host.KVStoreSet("temp:playlist_ids", idListJSON)
+
 	// Kick off the first chunk
 	taskData, _ := json.Marshal(pluginTask{TaskType: "playlist_chunk", Offset: 0})
 	if _, err := host.TaskEnqueue("mood-analysis", taskData); err != nil {
@@ -782,27 +816,23 @@ func refreshPlaylists() int32 {
 		return 1
 	}
 
-	pdk.Log(pdk.LogInfo, "First playlist chunk queued (Offset 0)")
+	pdk.Log(pdk.LogInfo, fmt.Sprintf("Playlist generation started (Library: %d tracks)", len(allIDs)))
 	return 0
 }
 
 func handlePlaylistChunk(offset int) int32 {
-	const chunkSize = 5000 // Process 5,000 tracks per task to stay well within 30s limit
+	// PERFORMANCE TWEAK (v0.5.9):
+	// Reduced chunk size from 5000 to 2000 to provide more headroom for the 30s limit.
+	const chunkSize = 2000 
 	const maxCandidates = 500 // Hold up to 500 best candidates for each mood in temporary storage
 
-	indexData, ok, _ := host.KVStoreGet("mood:index")
-	if !ok || len(indexData) == 0 {
+	// Load the cached sorted IDs
+	idListData, ok, _ := host.KVStoreGet("temp:playlist_ids")
+	if !ok || len(idListData) == 0 {
 		return 0
 	}
-	var trackIndex map[string]string
-	json.Unmarshal(indexData, &trackIndex)
-
-	// Collect IDs in stable order for chunking
-	allIDs := make([]string, 0, len(trackIndex))
-	for id := range trackIndex {
-		allIDs = append(allIDs, id)
-	}
-	sort.Strings(allIDs)
+	var allIDs []string
+	json.Unmarshal(idListData, &allIDs)
 
 	if offset >= len(allIDs) {
 		// We've processed the entire library, trigger the finisher
@@ -810,6 +840,10 @@ func handlePlaylistChunk(offset int) int32 {
 		host.TaskEnqueue("mood-analysis", taskData)
 		return 0
 	}
+
+	indexData, _, _ := host.KVStoreGet("mood:index")
+	var trackIndex map[string]string
+	json.Unmarshal(indexData, &trackIndex)
 
 	end := offset + chunkSize
 	if end > len(allIDs) {
@@ -827,12 +861,20 @@ func handlePlaylistChunk(offset int) int32 {
 		if err := json.Unmarshal(data, &scores); err != nil {
 			continue
 		}
+		
 		info := trackIndex[id]
 		parts := strings.SplitN(info, "|", 2)
 		name, artist := parts[0], ""
 		if len(parts) > 1 {
 			artist = parts[1]
 		}
+
+		// Self-healing: if name is missing from index, skip for now. 
+		// It will be fixed by the next analysis run's updateIndex safeguard.
+		if name == "" {
+			continue
+		}
+
 		chunkTracks = append(chunkTracks, trackWithScores{ID: id, Name: name, Artist: artist, Scores: scores})
 	}
 
@@ -941,6 +983,9 @@ func finishPlaylistGeneration() int32 {
 	for _, m := range compositeMoods {
 		process(m.Key, m.Label)
 	}
+
+	// Cleanup the ID list
+	host.KVStoreSet("temp:playlist_ids", []byte("[]"))
 
 	pdk.Log(pdk.LogInfo, "Mood playlists successfully refreshed!")
 	return 0
@@ -1133,6 +1178,15 @@ func updateIndex(id, title, artist string) {
 	if index == nil {
 		index = make(map[string]string)
 	}
+
+	// Safeguard: Do not overwrite an existing name with a blank string.
+	// This heals the "missing song names" bug reported in v0.5.8.
+	if title == "" {
+		if _, found := index[id]; found {
+			return // Keep what we have
+		}
+	}
+
 	index[id] = title + "|" + artist
 	data, _ := json.Marshal(index)
 	host.KVStoreSet("mood:index", data)
