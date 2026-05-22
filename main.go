@@ -56,8 +56,10 @@ type AnalysisResponse struct {
 }
 
 type trackWithScores struct {
-	id, name, artist string
-	scores           MoodScores
+	ID     string     `json:"id"`
+	Name   string     `json:"name"`
+	Artist string     `json:"artist"`
+	Scores MoodScores `json:"scores"`
 }
 
 // Simple mood: single score field >= threshold, with optional exclusion conditions.
@@ -743,11 +745,11 @@ func selectTracks(sorted []trackWithScores, limit, maxPerArtist, poolMultiplier 
 		if len(ids) >= limit {
 			break
 		}
-		artist := strings.ToLower(strings.TrimSpace(t.artist))
+		artist := strings.ToLower(strings.TrimSpace(t.Artist))
 		if artist == "" {
 			artist = "__unknown__"
 		}
-		title := strings.ToLower(strings.TrimSpace(t.name))
+		title := strings.ToLower(strings.TrimSpace(t.Name))
 		dupKey := title + "\x00" + artist
 		if seen[dupKey] {
 			continue
@@ -755,7 +757,7 @@ func selectTracks(sorted []trackWithScores, limit, maxPerArtist, poolMultiplier 
 		if maxPerArtist > 0 && artistCount[artist] >= maxPerArtist {
 			continue
 		}
-		ids = append(ids, t.id)
+		ids = append(ids, t.ID)
 		artistCount[artist]++
 		seen[dupKey] = true
 	}
@@ -831,7 +833,7 @@ func handlePlaylistChunk(offset int) int32 {
 		if len(parts) > 1 {
 			artist = parts[1]
 		}
-		chunkTracks = append(chunkTracks, trackWithScores{id: id, name: name, artist: artist, scores: scores})
+		chunkTracks = append(chunkTracks, trackWithScores{ID: id, Name: name, Artist: artist, Scores: scores})
 	}
 
 	// 2. Evaluate and merge candidates for each mood
@@ -845,15 +847,15 @@ func handlePlaylistChunk(offset int) int32 {
 		var matches []trackWithScores
 		for _, t := range chunkTracks {
 			if isComposite {
-				if matchesAllConditions(t.scores, conditions) {
+				if matchesAllConditions(t.Scores, conditions) {
 					matches = append(matches, t)
 				}
 			} else {
 				// Simple mood logic
-				if getScore(t.scores, scoreField) >= threshold {
+				if getScore(t.Scores, scoreField) >= threshold {
 					excluded := false
 					for _, ex := range conditions { // For simple moods, conditions = Exclude list
-						val := getScore(t.scores, ex.Field)
+						val := getScore(t.Scores, ex.Field)
 						if (ex.Op == ">=" && val >= ex.Value) || (ex.Op == "<" && val < ex.Value) {
 							excluded = true
 							break
@@ -873,7 +875,7 @@ func handlePlaylistChunk(offset int) int32 {
 			finalSortField = sortField
 		}
 		sort.Slice(all, func(i, j int) bool {
-			return getScore(all[i].scores, finalSortField) > getScore(all[j].scores, finalSortField)
+			return getScore(all[i].Scores, finalSortField) > getScore(all[j].Scores, finalSortField)
 		})
 
 		// Cap size to keep KV value small
