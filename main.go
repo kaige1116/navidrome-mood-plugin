@@ -57,8 +57,8 @@ type AnalysisResponse struct {
 
 type trackWithScores struct {
 	ID     string     `json:"id"`
-	Name   string     `json:"name"`
-	Artist string     `json:"artist"`
+	Name   string     `json:"name,omitempty"`
+	Artist string     `json:"artist,omitempty"`
 	Scores MoodScores `json:"scores"`
 }
 
@@ -821,9 +821,9 @@ func refreshPlaylists() int32 {
 }
 
 func handlePlaylistChunk(offset int) int32 {
-	// PERFORMANCE TWEAK (v0.5.9):
-	// Reduced chunk size from 5000 to 2000 to provide more headroom for the 30s limit.
-	const chunkSize = 2000 
+	// PERFORMANCE TWEAK (v0.6.0):
+	// Reduced chunk size to 1000 for maximum safety on low-power hardware.
+	const chunkSize = 1000 
 	const maxCandidates = 500 // Hold up to 500 best candidates for each mood in temporary storage
 
 	// Load the cached sorted IDs
@@ -841,9 +841,9 @@ func handlePlaylistChunk(offset int) int32 {
 		return 0
 	}
 
-	indexData, _, _ := host.KVStoreGet("mood:index")
-	var trackIndex map[string]string
-	json.Unmarshal(indexData, &trackIndex)
+	// PERFORMANCE OPTIMIZATION (v0.6.0): 
+	// Removed mood:index parsing from this phase. We only need IDs and Scores here.
+	// Title/Artist lookups are deferred to the final finisher task.
 
 	end := offset + chunkSize
 	if end > len(allIDs) {
@@ -862,20 +862,8 @@ func handlePlaylistChunk(offset int) int32 {
 			continue
 		}
 		
-		info := trackIndex[id]
-		parts := strings.SplitN(info, "|", 2)
-		name, artist := parts[0], ""
-		if len(parts) > 1 {
-			artist = parts[1]
-		}
-
-		// Self-healing: if name is missing from index, skip for now. 
-		// It will be fixed by the next analysis run's updateIndex safeguard.
-		if name == "" {
-			continue
-		}
-
-		chunkTracks = append(chunkTracks, trackWithScores{ID: id, Name: name, Artist: artist, Scores: scores})
+		// Note: Name and Artist are left blank here to keep temporary KV storage small.
+		chunkTracks = append(chunkTracks, trackWithScores{ID: id, Scores: scores})
 	}
 
 	// 2. Evaluate and merge candidates for each mood
@@ -960,6 +948,12 @@ func finishPlaylistGeneration() int32 {
 	maxPerArtist := configInt("max_tracks_per_artist", 3)
 	existingIDs := getExistingPlaylistIDs()
 
+	// PERFORMANCE OPTIMIZATION (v0.6.0): 
+	// Load the index once at the end to hydrate metadata for the selected tracks.
+	indexData, _, _ := host.KVStoreGet("mood:index")
+	var trackIndex map[string]string
+	json.Unmarshal(indexData, &trackIndex)
+
 	process := func(moodKey string, label string) {
 		key := "temp:playlist:" + moodKey
 		data, ok, _ := host.KVStoreGet(key)
@@ -968,6 +962,20 @@ func finishPlaylistGeneration() int32 {
 		}
 		var candidates []trackWithScores
 		json.Unmarshal(data, &candidates)
+
+		// HYDRATION PHASE:
+		// Fill in the missing Name/Artist for candidates before selection.
+		if trackIndex != nil {
+			for i := range candidates {
+				if info, found := trackIndex[candidates[i].ID]; found {
+					parts := strings.SplitN(info, "|", 2)
+					candidates[i].Name = parts[0]
+					if len(parts) > 1 {
+						candidates[i].Artist = parts[1]
+					}
+				}
+			}
+		}
 
 		songIDs := selectTracks(candidates, trackCount, maxPerArtist, poolMultiplier)
 		if len(songIDs) > 0 {
