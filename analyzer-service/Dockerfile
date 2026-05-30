@@ -23,17 +23,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r req_arm.txt && \
     git clone --depth 1 https://github.com/MTG/essentia.git /tmp/essentia && \
     cd /tmp/essentia && \
-    # Create a python script to handle the symlinks to avoid shell escaping issues
-    echo 'import tensorflow as tf' > link_tf.py && \
-    echo 'import os' >> link_tf.py && \
-    echo 'tf_lib = tf.sysconfig.get_lib()' >> link_tf.py && \
-    echo 'tf_inc = tf.sysconfig.get_include()' >> link_tf.py && \
-    echo 'os.system(f"ln -sf {tf_lib}/libtensorflow_framework.so.2 /usr/local/lib/libtensorflow_framework.so")' >> link_tf.py && \
-    echo 'os.system(f"ln -sf {tf_lib}/python/_pywrap_tensorflow_internal.so /usr/local/lib/libpywrap_tensorflow_internal.so")' >> link_tf.py && \
-    echo 'os.system("mkdir -p /usr/local/lib/pkgconfig")' >> link_tf.py && \
-    echo 'with open("/usr/local/lib/pkgconfig/tensorflow.pc", "w") as f:' >> link_tf.py && \
-    echo '    f.write(f"Name: TensorFlow\\nDescription: TensorFlow library\\nVersion: 2.15.0\\nCflags: -I{tf_inc}\\nLibs: -L/usr/local/lib -ltensorflow_framework -lpywrap_tensorflow_internal\\n")' >> link_tf.py && \
-    python3 link_tf.py && \
+    python3 -c "import tensorflow as tf, os; lib = tf.sysconfig.get_lib(); inc = tf.sysconfig.get_include(); os.system(f'ln -sf {lib}/libtensorflow_framework.so.2 /usr/local/lib/libtensorflow_framework.so'); os.system(f'ln -sf {lib}/python/_pywrap_tensorflow_internal.so /usr/local/lib/libpywrap_tensorflow_internal.so'); os.makedirs('/usr/local/lib/pkgconfig', exist_ok=True); open('/usr/local/lib/pkgconfig/tensorflow.pc', 'w').write(f'Name: TensorFlow\nDescription: TensorFlow library\nVersion: 2.15.0\nCflags: -I{inc}\nLibs: -L/usr/local/lib -ltensorflow_framework -lpywrap_tensorflow_internal\n')" && \
     ldconfig && \
     export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig && \
     python3 waf configure --build-static --with-python --with-tensorflow && \
