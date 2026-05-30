@@ -19,14 +19,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN set -x && \
     pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir tensorflow && \
+    pip install --no-cache-dir "tensorflow<2.16" && \
     grep -v "essentia-tensorflow" requirements.txt > req_arm.txt && \
     pip install --no-cache-dir -r req_arm.txt && \
     git clone --depth 1 https://github.com/MTG/essentia.git /tmp/essentia && \
     cd /tmp/essentia && \
     bash ./src/3rdparty/tensorflow/setup_from_python.sh && \
     python3 waf configure --build-static --with-python --with-tensorflow && \
-    python3 waf -j 2 && \
+    python3 waf -j 1 && \
     python3 waf install && \
     cd /app && rm -rf /tmp/essentia
 
