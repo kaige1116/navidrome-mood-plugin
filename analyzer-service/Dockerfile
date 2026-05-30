@@ -23,8 +23,14 @@ RUN set -x && \
     grep -v "essentia-tensorflow" requirements.txt > req_arm.txt && \
     pip install --no-cache-dir -r req_arm.txt && \
     git clone --depth 1 https://github.com/MTG/essentia.git /tmp/essentia && \
+    TF_DIR=$(python3 -c 'import tensorflow as tf; print(tf.sysconfig.get_lib())') && \
+    TF_INC=$(python3 -c 'import tensorflow as tf; print(tf.sysconfig.get_include())') && \
+    ln -sf $TF_DIR/libtensorflow_framework.so.2 /usr/local/lib/libtensorflow_framework.so && \
+    ln -sf $TF_DIR/python/_pywrap_tensorflow_internal.so /usr/local/lib/libpywrap_tensorflow_internal.so && \
+    ldconfig && \
+    mkdir -p /usr/local/lib/pkgconfig && \
+    echo "Name: TensorFlow\nDescription: TensorFlow library\nVersion: 2.15.0\nCflags: -I$TF_INC\nLibs: -L/usr/local/lib -ltensorflow_framework -lpywrap_tensorflow_internal" > /usr/local/lib/pkgconfig/tensorflow.pc && \
     cd /tmp/essentia && \
-    bash ./src/3rdparty/tensorflow/setup_from_python.sh && \
     python3 waf configure --build-static --with-python --with-tensorflow && \
     python3 waf -j 1 && \
     python3 waf install && \
