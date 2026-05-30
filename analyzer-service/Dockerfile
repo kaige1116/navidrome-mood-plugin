@@ -9,31 +9,8 @@ FROM base AS build-amd64
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# ARM64 Build Stage (Uses official pre-compiled Essentia image)
-FROM mtgupf/essentia:ubuntu22.04-v2.1_beta5 AS build-arm64
-# The official image already has essentia-tensorflow compiled and installed in its python environment.
-# We just need to make sure the base dependencies match so we can copy it over.
-# It uses Python 3.10, but since we are copying the raw .so files and python package, 
-# it's better to just use their environment directly or copy the specific site-packages.
-# Actually, since their image is Ubuntu-based and we are Debian-slim, it might be safer
-# to build our own image on top of theirs for ARM64, or use a multi-stage approach.
-
-# Let's pivot: For ARM64, just use the official image as the base.
-# But since we use python:3.11-slim, mixing glibc versions might be bad.
-# Let's try to just pip install on arm64 again, but using the specific flags they use.
-
-# Wait, MTG provides wheels now? No.
-# Let's try another approach for build-arm64: Use a pure python 3.11 environment,
-# and install `essentia-tensorflow` from a community wheel index if one exists, or 
-# build with a simpler command.
-
-# Since we struggled with tf library paths, let's use the exact method from the successful AMD64 build:
-# Wait, AMD64 works because there IS a wheel on PyPI.
-# Let's try to install `essentia` via pip but skip tensorflow on ARM, 
-# and use the ONNX models instead? No, plugin requires tensorflow.
-
-# Let's use the multi-stage build but correctly export the TF variables without breaking the shell script.
-# Write a python script to a file, then execute it.
+# ARM64 Build Stage
+FROM base AS build-arm64
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential git libyaml-dev libfftw3-dev libavcodec-dev \
     libavformat-dev libavutil-dev libswresample-dev libsamplerate0-dev \
