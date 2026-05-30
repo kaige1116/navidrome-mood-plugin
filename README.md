@@ -45,12 +45,14 @@ For detailed setup instructions, full configuration reference, troubleshooting, 
 ## Quick Start
 
 ### 1. Start the Analyzer Service
-
-The plugin needs an external service to perform audio analysis (essentia can't run inside WASM). A ready-to-use Docker image is included:
+The plugin needs an external service to perform audio analysis (essentia can't run inside WASM). A ready-to-use **multi-arch** Docker image (supporting amd64 and arm64/Raspberry Pi) is included:
 
 ```bash
 cd analyzer-service
+# On Raspberry Pi, this will compile Essentia from source (takes ~15 mins)
 docker build -t mood-analyzer .
+```
+
 docker run -d \
   --name mood-analyzer \
   -p 8000:8000 \

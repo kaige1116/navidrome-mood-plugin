@@ -52,7 +52,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: ./analyzer-service
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: |
             ghcr.io/${{ env.GHCR_USER_LOWER }}/navidrome-mood-plugin:latest
