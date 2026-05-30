@@ -31,6 +31,7 @@ RUN set -x && \
     cd /app && rm -rf /tmp/essentia
 
 # Select the appropriate build stage based on TARGETARCH
+ARG TARGETARCH
 FROM build-${TARGETARCH} AS builder
 
 # Final stage

@@ -17,7 +17,7 @@ env:
 
 jobs:
   build-and-push:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     env:
       IMAGE_NAME: navidrome-mood-plugin
       GHCR_USERNAME: ${{ github.actor }}
