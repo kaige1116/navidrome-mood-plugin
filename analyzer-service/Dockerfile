@@ -25,14 +25,15 @@ COPY requirements.txt .
 # Architecture-specific installation
 # For arm64, we must build essentia from source as no wheels are available on PyPI
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
+        pip install --no-cache-dir --upgrade pip && \
         pip install --no-cache-dir tensorflow && \
         grep -v "essentia-tensorflow" requirements.txt > req_arm.txt && \
         pip install --no-cache-dir -r req_arm.txt && \
         git clone --depth 1 https://github.com/MTG/essentia.git /tmp/essentia && \
         cd /tmp/essentia && \
-        ./src/3rdparty/tensorflow/setup_from_python.sh && \
+        bash ./src/3rdparty/tensorflow/setup_from_python.sh && \
         python3 waf configure --build-static --with-python --with-tensorflow && \
-        python3 waf && \
+        python3 waf -j 2 && \
         python3 waf install && \
         cd /app && rm -rf /tmp/essentia; \
     else \
@@ -42,9 +43,10 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
 # Final stage
 FROM base
 
-# Copy installed python packages and libraries from builder
-COPY --from=builder /usr/local/lib /usr/local/lib
-COPY --from=builder /usr/local/bin /usr/local/bin
+# Copy everything from /usr/local which includes:
+# - Python packages installed via pip
+# - Essentia libraries and headers installed via waf
+COPY --from=builder /usr/local /usr/local
 RUN ldconfig
 
 # Download Essentia TF mood models
