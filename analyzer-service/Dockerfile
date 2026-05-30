@@ -18,7 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rm -rf /var/lib/apt/lists/*
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir "tensorflow<2.16" "numpy<2" && \
+    pip install --no-cache-dir tensorflow==2.15.1 numpy==1.26.4 && \
     grep -v "essentia-tensorflow" requirements.txt > req_arm.txt && \
     pip install --no-cache-dir -r req_arm.txt && \
     git clone --depth 1 https://github.com/MTG/essentia.git /tmp/essentia && \
