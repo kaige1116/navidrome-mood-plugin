@@ -821,7 +821,7 @@ func refreshPlaylists() int32 {
 }
 
 func handlePlaylistChunk(offset int) int32 {
-	// PERFORMANCE TWEAK (v0.6.0):
+	// PERFORMANCE TWEAK (v0.7.0):
 	// Reduced chunk size to 1000 for maximum safety on low-power hardware.
 	const chunkSize = 1000 
 	const maxCandidates = 500 // Hold up to 500 best candidates for each mood in temporary storage
@@ -841,7 +841,7 @@ func handlePlaylistChunk(offset int) int32 {
 		return 0
 	}
 
-	// PERFORMANCE OPTIMIZATION (v0.6.0): 
+	// PERFORMANCE OPTIMIZATION (v0.7.0): 
 	// Removed mood:index parsing from this phase. We only need IDs and Scores here.
 	// Title/Artist lookups are deferred to the final finisher task.
 
@@ -948,7 +948,7 @@ func finishPlaylistGeneration() int32 {
 	maxPerArtist := configInt("max_tracks_per_artist", 3)
 	existingIDs := getExistingPlaylistIDs()
 
-	// PERFORMANCE OPTIMIZATION (v0.6.0): 
+	// PERFORMANCE OPTIMIZATION (v0.7.0): 
 	// Load the index once at the end to hydrate metadata for the selected tracks.
 	indexData, _, _ := host.KVStoreGet("mood:index")
 	var trackIndex map[string]string
