@@ -232,7 +232,21 @@ Note: Composite mood conditions (Study, Workout, etc.) are not configurable via 
 
 ## Building from Source
 
-### With Docker (no local Go/TinyGo required)
+### 1. Analyzer Service (Multi-Arch)
+
+The analyzer service Docker image is architecture-aware. When building from source, Docker will automatically detect your platform:
+
+```bash
+cd analyzer-service
+docker build -t mood-analyzer .
+```
+
+- **x64 (AMD64):** Build is fast (< 1 min) as it uses pre-compiled wheels.
+- **ARM64 (Raspberry Pi):** Build takes **15–20 minutes** on a Pi 5, as it installs build tools and compiles Essentia with TensorFlow support from source.
+
+### 2. Plugin (WASM)
+
+#### With Docker (no local Go/TinyGo required)
 
 ```bash
 make docker-build
