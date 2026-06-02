@@ -1,7 +1,8 @@
 FROM python:3.11-slim AS base
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg wget ca-certificates && \
+    ffmpeg wget ca-certificates \
+    libyaml-dev libfftw3-dev libtag1-dev libchromaprint-dev libsamplerate0-dev && \
     rm -rf /var/lib/apt/lists/*
 
 # AMD64 Build Stage
@@ -19,22 +20,31 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir tensorflow==2.15.1 numpy==1.26.4 && \
-    grep -v "essentia-tensorflow" requirements.txt > req_arm.txt && \
+    grep -vE "essentia-tensorflow|numpy" requirements.txt > req_arm.txt && \
     pip install --no-cache-dir -r req_arm.txt && \
     git clone --depth 1 https://github.com/MTG/essentia.git /tmp/essentia && \
     cd /tmp/essentia && \
-    ln -sf /usr/local/lib/python3.11/site-packages/tensorflow/libtensorflow_framework.so.2 /usr/local/lib/libtensorflow_framework.so && \
-    ln -sf /usr/local/lib/python3.11/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so /usr/local/lib/libpywrap_tensorflow_internal.so && \
+    find /usr/local/lib/python3.11/site-packages -name "*.so*" -exec cp -P {} /usr/local/lib/ \; && \
+    [ -f /usr/local/lib/libtensorflow_framework.so.2 ] && ln -sf /usr/local/lib/libtensorflow_framework.so.2 /usr/local/lib/libtensorflow_framework.so || true && \
+    [ -f /usr/local/lib/libtensorflow_cc.so.2 ] && ln -sf /usr/local/lib/libtensorflow_cc.so.2 /usr/local/lib/libtensorflow_cc.so || true && \
+    [ -f /usr/local/lib/_pywrap_tensorflow_internal.so ] && ln -sf /usr/local/lib/_pywrap_tensorflow_internal.so /usr/local/lib/libpywrap_tensorflow_internal.so || true && \
+    ldconfig && \
+    TF_LIBS="-Wl,--no-as-needed -lpywrap_tensorflow_internal -ltensorflow_framework" && \
+    [ -f /usr/local/lib/libtensorflow_cc.so ] && TF_LIBS="$TF_LIBS -ltensorflow_cc" || true && \
     mkdir -p /usr/local/lib/pkgconfig && \
-    echo "Name: TensorFlow" > /usr/local/lib/pkgconfig/tensorflow.pc && \
+    echo "prefix=/usr/local" > /usr/local/lib/pkgconfig/tensorflow.pc && \
+    echo "exec_prefix=\${prefix}" >> /usr/local/lib/pkgconfig/tensorflow.pc && \
+    echo "libdir=\${exec_prefix}/lib" >> /usr/local/lib/pkgconfig/tensorflow.pc && \
+    echo "includedir=\${prefix}/lib/python3.11/site-packages/tensorflow/include" >> /usr/local/lib/pkgconfig/tensorflow.pc && \
+    echo "" >> /usr/local/lib/pkgconfig/tensorflow.pc && \
+    echo "Name: TensorFlow" >> /usr/local/lib/pkgconfig/tensorflow.pc && \
     echo "Description: TensorFlow library" >> /usr/local/lib/pkgconfig/tensorflow.pc && \
     echo "Version: 2.15.0" >> /usr/local/lib/pkgconfig/tensorflow.pc && \
-    echo "Cflags: -I/usr/local/lib/python3.11/site-packages/tensorflow/include" >> /usr/local/lib/pkgconfig/tensorflow.pc && \
-    echo "Libs: -L/usr/local/lib -ltensorflow_framework -lpywrap_tensorflow_internal" >> /usr/local/lib/pkgconfig/tensorflow.pc && \
-    ldconfig && \
+    echo "Cflags: -I\${includedir}" >> /usr/local/lib/pkgconfig/tensorflow.pc && \
+    echo "Libs: -L\${libdir} $TF_LIBS" >> /usr/local/lib/pkgconfig/tensorflow.pc && \
     export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig && \
-    python3 waf configure --build-static --with-python --with-tensorflow && \
-    python3 waf -j 1 && \
+    python3 waf configure --with-python --with-tensorflow && \
+    LDFLAGS="-L/usr/local/lib $TF_LIBS" python3 waf -j 1 && \
     python3 waf install && \
     cd /app && rm -rf /tmp/essentia
 
@@ -44,8 +54,14 @@ FROM build-${TARGETARCH} AS builder
 
 # Final stage
 FROM base
-COPY --from=builder /usr/local /usr/local
-RUN ldconfig
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/lib /usr/local/lib
+COPY --from=builder /usr/local/bin /usr/local/bin
+RUN ldconfig && \
+    [ -f /usr/local/lib/libtensorflow_framework.so.2 ] && ln -sf /usr/local/lib/libtensorflow_framework.so.2 /usr/local/lib/libtensorflow_framework.so || true && \
+    [ -f /usr/local/lib/libtensorflow_cc.so.2 ] && ln -sf /usr/local/lib/libtensorflow_cc.so.2 /usr/local/lib/libtensorflow_cc.so || true && \
+    [ -f /usr/local/lib/_pywrap_tensorflow_internal.so ] && ln -sf /usr/local/lib/_pywrap_tensorflow_internal.so /usr/local/lib/libpywrap_tensorflow_internal.so || true && \
+    ldconfig
 
 # Download Essentia TF mood models
 RUN mkdir -p /app/models && \

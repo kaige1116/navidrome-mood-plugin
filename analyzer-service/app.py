@@ -127,8 +127,10 @@ def health():
         _load_essentia()
         effnet = os.path.join(MODELS_DIR, "discogs-effnet-bs64-1.pb")
         return {"status": "ok", "models_available": os.path.exists(effnet)}
-    except ImportError:
-        return {"status": "error", "message": "essentia not installed"}
+    except ImportError as e:
+        return {"status": "error", "message": f"essentia not installed: {e}"}
+    except Exception as e:
+        return {"status": "error", "message": f"Unexpected error: {e}"}
 
 
 def _analyze_path(file_path: str) -> dict:

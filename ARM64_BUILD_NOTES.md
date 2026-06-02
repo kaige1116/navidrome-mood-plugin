@@ -40,6 +40,40 @@ The `essentia-tensorflow` pip package does **not** provide pre-built `arm64` whe
     5. **Hardcoded pkg-config:** Uses simple `echo "..." >>` commands to write `tensorflow.pc` line-by-line, pointing `Cflags` to the hardcoded `include` directory.
     6. Runs `waf configure` and `waf install`.
 
+### 6. Missing Runtime Dependencies & NumPy 2.0 Conflict
+*   **Action:** 
+    1.  Added missing runtime libraries (`libyaml-0-2`, `libfftw3-3`, `libtag1v5`, `libchromaprint1`, `libsamplerate0`) to the `base` Docker stage so they persist in the final image.
+    2.  Locked `numpy<2.0` in `requirements.txt` and ensured ARM64 build explicitly uses `numpy==1.26.4` to avoid breaking TensorFlow 2.15.1.
+    3.  Improved health check error reporting in `app.py` to capture the specific `ImportError` message.
+*   **Status:** Pending verification. These changes address the "essentia not installed" error which was likely caused by missing shared libraries or a broken TensorFlow/NumPy environment.
+
+### 7. TensorFlow Library Linkage & Persistence
+*   **Action:** 
+    1.  Changed library linking from `ln -sf` (symlinks) to `cp` (copy) for TensorFlow shared libraries in the builder stage. This ensures they are actual files in `/usr/local/lib` rather than pointers to the transient Python site-packages folder.
+    2.  Explicitly copied site-packages and specific `/usr/local` subfolders to the final image stage to ensure all Python dependencies (TF, NumPy) are preserved.
+*   **Status:** Pending verification. This addresses the `libtensorflow_framework.so.2: No such file or directory` error found during local testing.
+
+### 8. Undefined Symbol: TF_DeleteSession
+*   **Action:** 
+    1.  Ensured `ldconfig` is run *before* the Essentia build so the linker can find the TensorFlow libraries we copied.
+    2.  Updated the `tensorflow.pc` (pkg-config) file to use standard variable structures and ensure the correct include and library paths are referenced.
+    3.  Removed `--build-static` from `waf configure`.
+    4.  **Added explicit `LDFLAGS`** (`-ltensorflow_framework -lpywrap_tensorflow_internal`) during the `waf` build phase. This forces the linker to resolve the TensorFlow symbols and record the dependency in `libessentia.so`.
+*   **Status:** Pending verification. This addresses the runtime error where Essentia fails to load due to missing TensorFlow C++ symbols.
+
+### 9. Missing libtensorflow_cc.so.2
+*   **Action:** 
+    1.  Updated the Dockerfile to use `find` to copy **all** TensorFlow-related shared libraries from the pip package to `/usr/local/lib`. This ensures architecture-specific libraries like `libtensorflow_cc.so.2` (which appeared in the ARM64 build) are included.
+    2.  Implemented dynamic discovery of these libraries during the build to automatically add `-ltensorflow_cc` to the linker flags if the library is present.
+    3.  Updated the final stage to robustly recreate symlinks for all possible TensorFlow library variations.
+*   **Status:** Pending verification. This addresses the runtime error where `libessentia.so` was looking for `libtensorflow_cc.so.2`.
+
+### 10. Missing Vendored Libraries (e.g., libomp)
+*   **Action:** 
+    1.  Updated the Dockerfile to **exhaustively find and copy ALL** shared libraries (`.so`) from the entire Python `site-packages` directory into `/usr/local/lib`.
+    2.  This ensures that hidden dependencies like `libomp-54bf90fd.so.5` (which are often bundled deep within subdirectories of wheels like NumPy or TensorFlow) are successfully moved to the system path and registered with `ldconfig`.
+*   **Status:** Pending verification. This addresses the stubborn `libomp: No such file or directory` error.
+
 ## Next Steps if Build Fails Again
 If the current "Hardcoded Paths" commit fails, the next logical steps for debugging are:
 1.  **Check the logs:** If it fails during `waf configure`, it means the hardcoded paths might be slightly different on ARM64 vs AMD64 (though unlikely for standard pip).

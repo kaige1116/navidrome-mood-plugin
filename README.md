@@ -45,12 +45,14 @@ For detailed setup instructions, full configuration reference, troubleshooting, 
 ## Quick Start
 
 ### 1. Start the Analyzer Service
-The plugin needs an external service to perform audio analysis (essentia can't run inside WASM). A ready-to-use **multi-arch** Docker image (supporting amd64 and arm64/Raspberry Pi) is included:
+The plugin needs an external service to perform audio analysis (essentia can't run inside WASM). A ready-to-use **multi-arch** Docker image (supporting amd64 and arm64/Raspberry Pi) is provided.
+
+**Important for ARM64 Users:** Since there are no pre-built `essentia-tensorflow` wheels for ARM64, the Dockerfile will compile Essentia from source. It is highly recommended to **build the image natively on your device** rather than using emulated multi-arch builds, which are extremely slow and prone to memory issues.
 
 ```bash
 cd analyzer-service
-# On Raspberry Pi, this will compile Essentia from source (takes ~15 mins)
-docker build -t mood-analyzer .
+# On Raspberry Pi, this will compile Essentia from source (~15-20 mins on Pi 5)
+docker build --build-arg TARGETARCH=arm64 -t mood-analyzer .
 ```
 
 docker run -d \
