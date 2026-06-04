@@ -22,7 +22,7 @@ from pydantic import BaseModel
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Mood Analyzer", version="1.2.1")
+app = FastAPI(title="Mood Analyzer", version="1.2.2")
 
 MODELS_DIR = os.environ.get("MODELS_DIR", "/app/models")
 ANALYSIS_DURATION = 120.0  # seconds — cap audio loaded per track for predictable analysis time
