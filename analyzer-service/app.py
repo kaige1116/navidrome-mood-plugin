@@ -28,6 +28,7 @@ MODELS_DIR = os.environ.get("MODELS_DIR", "/app/models")
 ANALYSIS_DURATION = 120.0  # seconds — cap audio loaded per track for predictable analysis time
 
 _es = None
+_models = {}
 
 
 def _load_essentia():
@@ -36,6 +37,31 @@ def _load_essentia():
         import essentia.standard as es
         _es = es
     return _es
+
+
+def _get_model(key, model_file, output_layer, is_effnet=False):
+    """Load and cache an Essentia-TensorFlow model."""
+    global _models
+    if key not in _models:
+        es = _load_essentia()
+        model_path = os.path.join(MODELS_DIR, model_file)
+        if not os.path.exists(model_path):
+            logger.warning(f"Model file not found: {model_path}")
+            return None
+        try:
+            if is_effnet:
+                _models[key] = es.TensorflowPredictEffnetDiscogs(
+                    graphFilename=model_path, output=output_layer
+                )
+            else:
+                _models[key] = es.TensorflowPredict2D(
+                    graphFilename=model_path, output=output_layer
+                )
+            logger.info(f"Loaded model: {key}")
+        except Exception as e:
+            logger.error(f"Failed to load model {key}: {e}")
+            return None
+    return _models.get(key)
 
 
 # ── Genre/BPM Context Boosts ─────────────────────────────────
@@ -174,12 +200,14 @@ def _analyze_path(file_path: str) -> dict:
     max_samples_16k = int(ANALYSIS_DURATION * 16000)
     if len(audio_16k) > max_samples_16k:
         audio_16k = audio_16k[:max_samples_16k]
-    effnet_path = os.path.join(MODELS_DIR, "discogs-effnet-bs64-1.pb")
+
+    effnet_model = _get_model("effnet", "discogs-effnet-bs64-1.pb", "PartitionedCall:1", is_effnet=True)
+    if not effnet_model:
+        logger.error("Effnet model not available")
+        return {"error": "Internal model error"}
 
     try:
-        embeddings = es.TensorflowPredictEffnetDiscogs(
-            graphFilename=effnet_path, output="PartitionedCall:1"
-        )(audio_16k)
+        embeddings = effnet_model(audio_16k)
     except Exception as e:
         logger.error(f"Embedding failed: {e}")
         results.update({k: 0.0 for k in [
@@ -200,26 +228,22 @@ def _analyze_path(file_path: str) -> dict:
     }
 
     for key, model_file in mood_models.items():
-        model_path = os.path.join(MODELS_DIR, model_file)
         try:
-            if not os.path.exists(model_path):
+            model = _get_model(key, model_file, "model/Softmax")
+            if not model:
                 results[key] = 0.0
                 continue
-            preds = es.TensorflowPredict2D(
-                graphFilename=model_path, output="model/Softmax"
-            )(embeddings)
+            preds = model(embeddings)
             results[key] = round(float(np.mean(preds[:, 1])), 4)
         except Exception as e:
             logger.warning(f"{key} failed: {e}")
             results[key] = 0.0
 
     # Danceability
-    dance_path = os.path.join(MODELS_DIR, "danceability-discogs-effnet-1.pb")
     try:
-        if os.path.exists(dance_path):
-            preds = es.TensorflowPredict2D(
-                graphFilename=dance_path, output="model/Softmax"
-            )(embeddings)
+        dance_model = _get_model("danceability", "danceability-discogs-effnet-1.pb", "model/Softmax")
+        if dance_model:
+            preds = dance_model(embeddings)
             results["danceability"] = round(float(np.mean(preds[:, 1])), 4)
         else:
             results["danceability"] = 0.0
